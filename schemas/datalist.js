@@ -2,10 +2,10 @@ const mongoose = require('mongoose')
 
 const datalistSchema = new mongoose.Schema(
 {
-    "list": [
+    list: [
     {
-        "collectionName": String,
-        "entryName": String
+        collectionName: String,
+        entryName: String
     }]
 })
 

@@ -6,7 +6,7 @@ const logSchema = new mongoose.Schema(
     uploadDate: { type: Date, default: Date.now },
     name: String,
     fileName: String,
-    dataDate: Date,
+    dataDate: String,
     comments: String,
     data: String
 })

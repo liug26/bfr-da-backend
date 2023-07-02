@@ -6,29 +6,22 @@ How to deploy Express & Node to AWS EC2: https://jonathans199.medium.com/how-to-
 const express = require('express')
 const database = require('./connections/database')
 const master = require('./connections/master')
+const logger = require('./logger')
 const app = express()
 const port = 3001
 
-
-app.use(express.json());
+logger.info('Script starts')
+app.use(express.json({ limit: '50mb' }))
 
 app.listen(port, () => 
 {
-    console.log(`BFRDA listening on port ${port}`)
+    logger.info(`Listening on port ${port}`)
 })
 
 app.get('/', (req, res) => 
 {
-    /*
-    if (db_connected == -1)
-        res.send('Connecting to database...')
-    else if (db_connected == 0)
-        res.send('Failed to connect to database')
-    else
-        res.send('Connected to database')
-    */
-   console.log(database.readyState)
-   res.send('Hello World!')
+    res.send((database.readyState == 1 ? 'Main database connected' : 'Main database disconnected') + '\n' + 
+    (master.readyState == 1 ? 'Master database connected' : 'Master database disconnected'))
 })
 
 const apiRoute = require('./routes/api');

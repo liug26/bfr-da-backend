@@ -1,17 +1,18 @@
 require('dotenv').config()
-const databaseURL = process.env.DATABASE_URL;
-const mongoose = require('mongoose');
+const databaseURL = process.env.DATABASE_URL
+const mongoose = require('mongoose')
+const logger = require('../logger')
 
-const database = mongoose.createConnection(databaseURL);
+const database = mongoose.createConnection(databaseURL)
     
 database.on('error', (error) =>
 {
-    console.log(error)
+    logger.error('Error occured while trying to connect to main database', error)
 })
     
 database.once('connected', () =>
 {
-    console.log('Main database connected');
+    logger.info('Main database connected')
 })
 
 module.exports = database
