@@ -213,8 +213,6 @@ router.get('/plot', async (req, res) =>
     try
     {
         logger.http(`Request query: ${JSON.stringify(req.query, null, 2)}`)
-        if (req.query.extraArgs == undefined)
-            req.query.extraArgs = ''
 
         // check if req.query is good
         if (!PLOT_GET_REQUIRED_KEYS.every(item => item in req.query))
@@ -247,7 +245,9 @@ router.get('/plot', async (req, res) =>
 
         // spwan python process to generate plot
         logger.info('Spawning log2plot process')
-        const args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', TEMPLOG_PATH]).concat([req.query.extraArgs])
+        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', TEMPLOG_PATH])
+        if (req.query.extraArgs != undefined)
+            args = args.concat([req.query.extraArgs])
         logger.info(`Arguments: ${args.join(' ')}`)
         const log2plot = spawn('python3', ['log2plot.py'].concat(args))
         let stdOut = ""
