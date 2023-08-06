@@ -42,3 +42,4 @@
 - mk8-data-parser.py: data parser Python script that parses log files into data types
 
 ### Deployment
+On the server, run `./build.sh`, then `node index.js`
