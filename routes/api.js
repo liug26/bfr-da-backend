@@ -114,7 +114,7 @@ router.delete('/data', async (req, res) =>
         // check password
         if (req.body.password != DELETE_PASSWORD)
         {
-            logger.error(`Incorrect password detected: ${req.body.password}`)
+            logger.warn(`Incorrect password detected: ${req.body.password}`)
             res.status(400).json({ message: 'Incorrect password' })
             return
         }
@@ -213,7 +213,7 @@ Response:
 200: plot: a string called plot that can be parsed as html containing the plot
 400 & 500: message: error message
 */
-const PLOT_GET_REQUIRED_KEYS = ['collection', 'name', 'plot']
+const PLOT_GET_REQUIRED_KEYS = ['collection', 'name', 'plot', 'parser']
 router.get('/plot', async (req, res) => 
 {
     logger.http('Get request received on /plot')
@@ -226,6 +226,15 @@ router.get('/plot', async (req, res) =>
         {
             logger.http('Request query does not contain all required values, stopping')
             res.status(400).json({ message: 'Missing required values in request query' })
+            return
+        }
+
+        // check if parser exists
+        let parser = `${req.query.parser}.py`
+        if (!fs.existsSync(parser))
+        {
+            logger.warn(`Parser: ${parser} does not exist`)
+            res.status(400).json({ message: 'Parser does not exist' })
             return
         }
 
@@ -255,7 +264,7 @@ router.get('/plot', async (req, res) =>
 
         // spwan python process to generate plot
         logger.info('Spawning log2plot process')
-        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', templog, '-o', tempplot])
+        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', templog, '-o', tempplot, '-v', parser])
         if (req.query.extraArgs != undefined)
             args = args.concat([req.query.extraArgs])
         logger.info(`Arguments: ${args.join(' ')}`)
