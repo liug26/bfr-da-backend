@@ -13,8 +13,7 @@ const fs = require('fs')
 const router = express.Router()
 
 const DATALIST_OBJID = new ObjectId('648e0c3534eca556e2aa62eb')
-const TEMPLOG_PATH = 'templog.csv'
-const TEMPPLOT_PATH = 'tempplot.html'
+const DELETE_PASSWORD = 'racing'
 
 
 /* Reference
@@ -96,7 +95,7 @@ Response:
 200: empty
 400 & 500: message: error message
 */
-DATA_DELETE_REQUIRED_KEYS = ['collection', 'name']
+DATA_DELETE_REQUIRED_KEYS = ['collection', 'name', 'password']
 router.delete('/data', async (req, res) => 
 {
     logger.http('Delete request received on /data')
@@ -109,6 +108,14 @@ router.delete('/data', async (req, res) =>
         {
             logger.http('Request body does not contain all required values, stopping')
             res.status(400).json({ message: 'Missing required values in request body' })
+            return
+        }
+
+        // check password
+        if (req.body.password != DELETE_PASSWORD)
+        {
+            logger.error(`Incorrect password detected: ${req.body.password}`)
+            res.status(400).json({ message: 'Incorrect password' })
             return
         }
         
@@ -240,12 +247,15 @@ router.get('/plot', async (req, res) =>
         logger.info('Got log entry')
 
         // write log data to temp file
+        temp_filename = Math.random().toString(36).substring(2, 5)
+        templog = `${temp_filename}.csv`
+        tempplot = `${temp_filename}.html`
         logger.info('Writing log data to templog')
-        fs.writeFileSync(TEMPLOG_PATH, logEntry.data)
+        fs.writeFileSync(templog, logEntry.data)
 
         // spwan python process to generate plot
         logger.info('Spawning log2plot process')
-        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', TEMPLOG_PATH])
+        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', templog, '-o', tempplot])
         if (req.query.extraArgs != undefined)
             args = args.concat([req.query.extraArgs])
         logger.info(`Arguments: ${args.join(' ')}`)
@@ -271,7 +281,7 @@ router.get('/plot', async (req, res) =>
             if (code == 0)
             {
                 logger.info('Reading tempplot')
-                const plot = fs.readFileSync(TEMPPLOT_PATH, 'utf8')
+                const plot = fs.readFileSync(tempplot, 'utf8')
                 logger.http('Request successful')
                 res.status(200).json({ plot: plot })
             }
@@ -281,6 +291,11 @@ router.get('/plot', async (req, res) =>
                 logger.info(`log2plot produces log: ${stdOut}`)
                 res.status(400).json({ message: `Error occured while generating plot: ${stdErr}` })
             }
+
+            if (fs.existsSync(templog))
+                fs.unlinkSync(templog)
+            if (fs.existsSync(tempplot))
+                fs.unlinkSync(tempplot)
         })
 
         // if the code above is never called, this should result in a timeout
