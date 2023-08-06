@@ -26,6 +26,12 @@
 - Get [URL]/api/plot: To get a plotly graph coded in HTML from data. Requires query to provide: "collection": the data's 2 super folders' names separated by a slash, "name": data's name, "plot": a comma-separated string listing the keys of the data types to be displayed on the graph, "parser": name of the parser, "extraArgs": (optional) additional flags and arguments to be passed to the Python script
 
 ### Code Structure
+- connections/: utility classes that connect to main & master database and exports it
+- logs/: stores log files up to 14 days
+- logs/.****-audit.json: logging settings
+- node_modules/: installed node modules
+- routes/api.js: determines how [URL]/api/ behaves
+- schemas/: utility classes that help create and locate entries in MongoDB
+- .env: (SENSITIVE), stores 3 variables: "DATABASE_URL" to connect to main database, "MASTER_URL" to connect to master database, and "DB_API_KEY" to 
 
-
-
+### Deployment
