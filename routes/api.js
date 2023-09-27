@@ -12,9 +12,8 @@ const logger = require('../logger')
 const fs = require('fs')
 const router = express.Router()
 
-const DATALIST_OBJID = new ObjectId('648e0c3534eca556e2aa62eb')
-const TEMPLOG_PATH = 'templog.csv'
-const TEMPPLOT_PATH = 'tempplot.html'
+const CATALOGLIST_OBJID = new ObjectId('6513714f70c183ef088ba28f')
+const DELETE_PASSWORD = 'racing'
 
 
 /* Reference
