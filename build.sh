@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 npm install
-pip install pandas numpy argparse plotly
+pip3 install pandas numpy argparse plotly
