@@ -1,6 +1,6 @@
 const mongoose = require('mongoose')
 
-const datalistSchema = new mongoose.Schema(
+const catalogListSchema = new mongoose.Schema(
 {
     list: [
     {
@@ -9,4 +9,4 @@ const datalistSchema = new mongoose.Schema(
     }]
 })
 
-module.exports = datalistSchema
+module.exports = catalogListSchema

@@ -5,16 +5,15 @@ const express = require('express')
 const { ObjectId } = require('mongodb')
 const { spawn } = require('child_process')
 const logSchema = require('../schemas/log')
-const datalistSchema = require('../schemas/datalist')
+const cataloglistSchema = require('../schemas/cataloglist')
 const database = require('../connections/database')
-const master = require('../connections/master')
+const catalog = require('../connections/catalog')
 const logger = require('../logger')
 const fs = require('fs')
 const router = express.Router()
 
-const DATALIST_OBJID = new ObjectId('648e0c3534eca556e2aa62eb')
-const TEMPLOG_PATH = 'templog.csv'
-const TEMPPLOT_PATH = 'tempplot.html'
+const CATALOGLIST_OBJID = new ObjectId('6513714f70c183ef088ba28f')
+const DELETE_PASSWORD = 'racing'
 
 
 /* Reference
@@ -70,13 +69,13 @@ router.post('/data', async (req, res) =>
         const dataToSave = await data.save()
         logger.info(`Saved model to main database: ${dataToSave}`)
 
-        // update master database
-        logger.info('Searching master database for datalist')
-        const datalistModel = master.model('datalist', datalistSchema)
-        let datalist = await datalistModel.findById(DATALIST_OBJID)
-        datalist.list.push({ 'collectionName': req.body.collection, 'entryName': req.body.name })
-        await datalistModel.findByIdAndUpdate(DATALIST_OBJID, { 'list': datalist.list })
-        logger.info('Updated datalist')
+        // update catalog database
+        logger.info('Searching catalog database for cataloglist')
+        const cataloglistModel = catalog.model('main', cataloglistSchema)
+        let cataloglist = await cataloglistModel.findById(CATALOGLIST_OBJID)
+        cataloglist.list.push({ 'collectionName': req.body.collection, 'entryName': req.body.name })
+        await cataloglistModel.findByIdAndUpdate(CATALOGLIST_OBJID, { 'list': cataloglist.list })
+        logger.info('Updated cataloglist')
 
         logger.http('Request successful')
         res.status(200).json({})
@@ -96,7 +95,7 @@ Response:
 200: empty
 400 & 500: message: error message
 */
-DATA_DELETE_REQUIRED_KEYS = ['collection', 'name']
+DATA_DELETE_REQUIRED_KEYS = ['collection', 'name', 'password']
 router.delete('/data', async (req, res) => 
 {
     logger.http('Delete request received on /data')
@@ -109,6 +108,14 @@ router.delete('/data', async (req, res) =>
         {
             logger.http('Request body does not contain all required values, stopping')
             res.status(400).json({ message: 'Missing required values in request body' })
+            return
+        }
+
+        // check password
+        if (req.body.password != DELETE_PASSWORD)
+        {
+            logger.warn(`Incorrect password detected: ${req.body.password}`)
+            res.status(400).json({ message: 'Incorrect password' })
             return
         }
         
@@ -132,13 +139,13 @@ router.delete('/data', async (req, res) =>
             logger.info('Collection dropped')
         }
 
-        // update on master database
-        const datalistModel = master.model('datalist', datalistSchema)
-        let datalist = await datalistModel.findById(DATALIST_OBJID)
-        const index = datalist.list.indexOf({ "collectionName": req.body.collection, "entryName": req.body.name })
-        datalist.list.splice(index, 1)
-        await datalistModel.findByIdAndUpdate(DATALIST_OBJID, { "list": datalist.list })
-        logger.info('Updated datalist')
+        // update on catalog database
+        const cataloglistModel = catalog.model('main', cataloglistSchema)
+        let cataloglist = await cataloglistModel.findById(CATALOGLIST_OBJID)
+        const index = cataloglist.list.indexOf({ "collectionName": req.body.collection, "entryName": req.body.name })
+        cataloglist.list.splice(index, 1)
+        await cataloglistModel.findByIdAndUpdate(CATALOGLIST_OBJID, { "list": cataloglist.list })
+        logger.info('Updated cataloglist')
 
         logger.http('Request successful')
         res.status(200).json({ })
@@ -161,15 +168,15 @@ router.get('/datatree', async (req, res) =>
     logger.http('Get request received on /datatree')
     try
     {
-        // get datatree from master
-        logger.info('Getting datatree from master database')
-        const datalistModel = master.model('datalist', datalistSchema)
-        let datalist = await datalistModel.findById(DATALIST_OBJID)
+        // get datatree from catalog
+        logger.info('Getting datatree from catalog database')
+        const cataloglistModel = catalog.model('main', cataloglistSchema)
+        let cataloglist = await cataloglistModel.findById(CATALOGLIST_OBJID)
 
         // construct tree object from list
         logger.info('Constructing tree object from list')
         let root = { name: 'root', next: [] }
-        datalist.list.forEach((element) =>
+        cataloglist.list.forEach((element) =>
         {
             // dir[0] is superFolder, dir[1] is subFolder
             const dir = element.collectionName.split('/')
@@ -193,6 +200,7 @@ router.get('/datatree', async (req, res) =>
     }
     catch (error)
     {
+        console.log(error)
         logger.error(`Unknown error occured at get /datatree: ${error.message}`)
         res.status(500).json({ message: `Unknown error occured: ${error.message}` })
     }
@@ -206,7 +214,7 @@ Response:
 200: plot: a string called plot that can be parsed as html containing the plot
 400 & 500: message: error message
 */
-const PLOT_GET_REQUIRED_KEYS = ['collection', 'name', 'plot']
+const PLOT_GET_REQUIRED_KEYS = ['collection', 'name', 'plot', 'parser']
 router.get('/plot', async (req, res) => 
 {
     logger.http('Get request received on /plot')
@@ -219,6 +227,15 @@ router.get('/plot', async (req, res) =>
         {
             logger.http('Request query does not contain all required values, stopping')
             res.status(400).json({ message: 'Missing required values in request query' })
+            return
+        }
+
+        // check if parser exists
+        let parser = `${req.query.parser}.py`
+        if (!fs.existsSync(parser))
+        {
+            logger.warn(`Parser: ${parser} does not exist`)
+            res.status(400).json({ message: 'Parser does not exist' })
             return
         }
 
@@ -240,12 +257,15 @@ router.get('/plot', async (req, res) =>
         logger.info('Got log entry')
 
         // write log data to temp file
+        temp_filename = Math.random().toString(36).substring(2, 5)
+        templog = `${temp_filename}.csv`
+        tempplot = `${temp_filename}.html`
         logger.info('Writing log data to templog')
-        fs.writeFileSync(TEMPLOG_PATH, logEntry.data)
+        fs.writeFileSync(templog, logEntry.data)
 
         // spwan python process to generate plot
         logger.info('Spawning log2plot process')
-        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', TEMPLOG_PATH])
+        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', templog, '-o', tempplot, '-v', parser])
         if (req.query.extraArgs != undefined)
             args = args.concat([req.query.extraArgs])
         logger.info(`Arguments: ${args.join(' ')}`)
@@ -271,7 +291,7 @@ router.get('/plot', async (req, res) =>
             if (code == 0)
             {
                 logger.info('Reading tempplot')
-                const plot = fs.readFileSync(TEMPPLOT_PATH, 'utf8')
+                const plot = fs.readFileSync(tempplot, 'utf8')
                 logger.http('Request successful')
                 res.status(200).json({ plot: plot })
             }
@@ -281,6 +301,11 @@ router.get('/plot', async (req, res) =>
                 logger.info(`log2plot produces log: ${stdOut}`)
                 res.status(400).json({ message: `Error occured while generating plot: ${stdErr}` })
             }
+
+            if (fs.existsSync(templog))
+                fs.unlinkSync(templog)
+            if (fs.existsSync(tempplot))
+                fs.unlinkSync(tempplot)
         })
 
         // if the code above is never called, this should result in a timeout
