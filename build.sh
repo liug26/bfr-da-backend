@@ -1,5 +1,6 @@
 #!/bin/sh
 
 npm install
-pip install --upgrade pip
+python3 -m pip install --upgrade pip
+pip uninstall pandas numpy argparse plotly
 pip install pandas numpy argparse plotly
