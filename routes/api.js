@@ -269,7 +269,7 @@ router.get('/plot', async (req, res) =>
         if (req.query.extraArgs != undefined)
             args = args.concat([req.query.extraArgs])
         logger.info(`Arguments: ${args.join(' ')}`)
-        const log2plot = spawn('python3', ['log2plot.py'].concat(args))
+        const log2plot = spawn('python', ['log2plot.py'].concat(args))
         let stdOut = ""
         let stdErr = ""
 
