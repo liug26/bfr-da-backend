@@ -6,6 +6,7 @@ const { ObjectId } = require('mongodb')
 const { spawn } = require('child_process')
 const logSchema = require('../schemas/log')
 const cataloglistSchema = require('../schemas/cataloglist')
+const redisClient = require('../utils/redis-client');
 const database = require('../connections/database')
 const catalog = require('../connections/catalog')
 const logger = require('../logger')
@@ -163,48 +164,56 @@ Response:
 200: returns an array of objects that contain: a string called name, and a similar array of objects called next
 400 & 500: message: error message
 */
-router.get('/datatree', async (req, res) => 
-{
-    logger.http('Get request received on /datatree')
-    try
-    {
-        // get datatree from catalog
-        logger.info('Getting datatree from catalog database')
-        const cataloglistModel = catalog.model('main', cataloglistSchema)
-        let cataloglist = await cataloglistModel.findById(CATALOGLIST_OBJID)
+router.get('/datatree', async (req, res) => {
+    logger.http('Get request received on /datatree');
+    try {
+        const cacheKey = 'datatree';
+        // Check if data is in cache
+        const cachedData = await redisClient.get(cacheKey);
+        
+        if (cachedData) {
+            logger.info('Returning cached datatree');
+            return res.status(200).json(JSON.parse(cachedData));
+        }
 
-        // construct tree object from list
-        logger.info('Constructing tree object from list')
-        let root = { name: 'root', next: [] }
-        cataloglist.list.forEach((element) =>
-        {
+        // Fetch data if not in cache
+        logger.info('Getting datatree from catalog database');
+        const cataloglistModel = catalog.model('main', cataloglistSchema);
+        let cataloglist = await cataloglistModel.findById(CATALOGLIST_OBJID);
+
+        // Construct tree object from list
+        logger.info('Constructing tree object from list');
+        let root = { name: 'root', next: [] };
+        cataloglist.list.forEach((element) => {
             // dir[0] is superFolder, dir[1] is subFolder
-            const dir = element.collectionName.split('/')
+            const dir = element.collectionName.split('/');
             // if superFolder doesn't exist, make one
             if (!root.next.some((element) => { return element.name == dir[0] }))
-                root.next.push({ name: dir[0], next: [] })
+                root.next.push({ name: dir[0], next: [] });
             // get superFolder
-            let superFolder = root.next.find((element) => { return element.name == dir[0] })
+            let superFolder = root.next.find((element) => { return element.name == dir[0] });
             // if subFolder doesn't exist under superFolder, make one
             if (!superFolder.next.some((element) => { return element.name == dir[1] }))
-                superFolder.next.push({ name: dir[1], next: [] })
+                superFolder.next.push({ name: dir[1], next: [] });
             // get subFolder
-            let subFolder = superFolder.next.find((element) => { return element.name == dir[1] })
+            let subFolder = superFolder.next.find((element) => { return element.name == dir[1] });
             // add entry under subFolder
-            subFolder.next.push({ name: element.entryName, next: [] })
-        })
-        logger.info('Tree built successfully')
+            subFolder.next.push({ name: element.entryName, next: [] });
+        });
+        logger.info('Tree built successfully');
 
-        logger.http('Request successful')
-        res.status(200).json(root.next)
+        // Cache the result
+        await redisClient.set(cacheKey, JSON.stringify(root.next));
+
+        logger.http('Request successful');
+        res.status(200).json(root.next);
+    } catch (error) {
+        console.log(error);
+        logger.error(`Unknown error occurred at get /datatree: ${error.message}`);
+        res.status(500).json({ message: `Unknown error occurred: ${error.message}` });
     }
-    catch (error)
-    {
-        console.log(error)
-        logger.error(`Unknown error occured at get /datatree: ${error.message}`)
-        res.status(500).json({ message: `Unknown error occured: ${error.message}` })
-    }
-})
+});
+
 
 
 /*
@@ -215,107 +224,108 @@ Response:
 400 & 500: message: error message
 */
 const PLOT_GET_REQUIRED_KEYS = ['collection', 'name', 'plot', 'parser']
-router.get('/plot', async (req, res) => 
-{
-    logger.http('Get request received on /plot')
-    try
-    {
-        logger.http(`Request query: ${JSON.stringify(req.query, null, 2)}`)
+router.get('/plot', async (req, res) => {
+    logger.http('Get request received on /plot');
+    try {
+        logger.http(`Request query: ${JSON.stringify(req.query, null, 2)}`);
 
-        // check if req.query is good
-        if (!PLOT_GET_REQUIRED_KEYS.every(item => item in req.query))
-        {
-            logger.http('Request query does not contain all required values, stopping')
-            res.status(400).json({ message: 'Missing required values in request query' })
-            return
+        // Check if req.query is good
+        if (!PLOT_GET_REQUIRED_KEYS.every(item => item in req.query)) {
+            logger.http('Request query does not contain all required values, stopping');
+            res.status(400).json({ message: 'Missing required values in request query' });
+            return;
         }
 
-        // check if parser exists
-        let parser = `${req.query.parser}.py`
-        if (!fs.existsSync(parser))
-        {
-            logger.warn(`Parser: ${parser} does not exist`)
-            res.status(400).json({ message: 'Parser does not exist' })
-            return
+        // Generate a unique key for Redis based on the request parameters
+        const cacheKey = `plot_${req.query.collection}_${req.query.name}_${req.query.plot}_${req.query.parser}`;
+
+        // Check if the plot is already cached in Redis
+        const cachedPlot = await redisClient.get(cacheKey);
+        if (cachedPlot) {
+            logger.info('Returning cached plot');
+            return res.status(200).json({ plot: cachedPlot });
         }
 
-        // check and get collection & entry
-        const logModel = database.model(req.query.collection, logSchema)
-        if (!logModel)
-        {
-            logger.warn(`Didn't find collection named ${req.query.collection}, stopping`)
-            res.status(400).json({ message: 'Collection doesn\'t exist' })
-            return
+        // Check if parser exists
+        let parser = `${req.query.parser}.py`;
+        if (!fs.existsSync(parser)) {
+            logger.warn(`Parser: ${parser} does not exist`);
+            res.status(400).json({ message: 'Parser does not exist' });
+            return;
         }
-        const logEntry = await logModel.findOne({ "name": req.query.name })
-        if (!logEntry)
-        {
-            logger.warn(`Didn't find entry named ${req.query.name}, stopping`)
-            res.status(400).json({ message: 'Entry doesn\'t exist' })
-            return
+
+        // Check and get collection & entry
+        const logModel = database.model(req.query.collection, logSchema);
+        if (!logModel) {
+            logger.warn(`Didn't find collection named ${req.query.collection}, stopping`);
+            res.status(400).json({ message: 'Collection doesn\'t exist' });
+            return;
         }
-        logger.info('Got log entry')
+        const logEntry = await logModel.findOne({ "name": req.query.name });
+        if (!logEntry) {
+            logger.warn(`Didn't find entry named ${req.query.name}, stopping`);
+            res.status(400).json({ message: 'Entry doesn\'t exist' });
+            return;
+        }
+        logger.info('Got log entry');
 
-        // write log data to temp file
-        temp_filename = Math.random().toString(36).substring(2, 5)
-        templog = `${temp_filename}.csv`
-        tempplot = `${temp_filename}.html`
-        logger.info('Writing log data to templog')
-        fs.writeFileSync(templog, logEntry.data)
+        // Write log data to temp file
+        const tempFilename = Math.random().toString(36).substring(2, 5);
+        const templog = `${tempFilename}.csv`;
+        const tempplot = `${tempFilename}.html`;
+        logger.info('Writing log data to templog');
+        fs.writeFileSync(templog, logEntry.data);
 
-        // spwan python process to generate plot
-        logger.info('Spawning log2plot process')
-        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', templog, '-o', tempplot, '-v', req.query.parser])
-        if (req.query.extraArgs != undefined)
-            args = args.concat([req.query.extraArgs])
-        logger.info(`Arguments: ${args.join(' ')}`)
-        const log2plot = spawn('python3', ['log2plot.py'].concat(args))
-        let stdOut = ""
-        let stdErr = ""
+        // Spawn python process to generate plot
+        logger.info('Spawning log2plot process');
+        let args = ['-p'].concat(req.query.plot.split(',')).concat(['-i', templog, '-o', tempplot, '-v', req.query.parser]);
+        if (req.query.extraArgs != undefined) {
+            args = args.concat([req.query.extraArgs]);
+        }
+        logger.info(`Arguments: ${args.join(' ')}`);
+        const log2plot = spawn('python3', ['log2plot.py'].concat(args));
+        let stdOut = "";
+        let stdErr = "";
 
-        // harvest python script outputs
-        log2plot.stdout.on('data', function (data)
-        {
-            stdOut = data.toString()
-        })
+        // Harvest python script outputs
+        log2plot.stdout.on('data', function (data) {
+            stdOut = data.toString();
+        });
 
-        log2plot.stderr.on('data', function (data)
-        {
-            stdErr = data.toString()
-        })
+        log2plot.stderr.on('data', function (data) {
+            stdErr = data.toString();
+        });
 
-        log2plot.on('close', (code) => 
-        {
-            logger.info(`Child process close all stdio with code ${code}`)
+        log2plot.on('close', async (code) => {
+            logger.info(`Child process closed all stdio with code ${code}`);
 
-            if (code == 0)
-            {
-                logger.info('Reading tempplot')
-                const plot = fs.readFileSync(tempplot, 'utf8')
-                logger.http('Request successful')
-                res.status(200).json({ plot: plot })
+            if (code === 0) {
+                logger.info('Reading tempplot');
+                const plot = fs.readFileSync(tempplot, 'utf8');
+
+                // Cache the plot in Redis
+                await redisClient.set(cacheKey, plot, { EX: 3600 }); // Cache for 1 hour
+
+                logger.http('Request successful');
+                res.status(200).json({ plot: plot });
+            } else {
+                logger.error(`log2plot produces error: ${stdErr}`);
+                logger.info(`log2plot produces log: ${stdOut}`);
+                res.status(400).json({ message: `Error occurred while generating plot: ${stdErr}` });
             }
-            else
-            {
-                logger.error(`log2plot produces error: ${stdErr}`)
-                logger.info(`log2plot produces log: ${stdOut}`)
-                res.status(400).json({ message: `Error occured while generating plot: ${stdErr}` })
-            }
 
-            if (fs.existsSync(templog))
-                fs.unlinkSync(templog)
-            if (fs.existsSync(tempplot))
-                fs.unlinkSync(tempplot)
-        })
+            // Clean up temp files
+            if (fs.existsSync(templog)) fs.unlinkSync(templog);
+            if (fs.existsSync(tempplot)) fs.unlinkSync(tempplot);
+        });
 
-        // if the code above is never called, this should result in a timeout
+        // If the code above is never called, this should result in a timeout
+    } catch (error) {
+        logger.error(`Unknown error occurred at get /plot: ${error.message}`);
+        res.status(500).json({ message: `Unknown error occurred: ${error.message}` });
     }
-    catch (error)
-    {
-        logger.error(`Unknown error occured at get /plot: ${error.message}`)
-        res.status(500).json({ message: `Unknown error occured: ${error.message}` })
-    }
-})
+});
+
 
 
 module.exports = router
